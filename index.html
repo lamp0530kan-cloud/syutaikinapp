@@ -31,10 +31,12 @@
       box-shadow: 0 1px 3px rgba(0,0,0,0.1);
       border: 1px solid var(--border);
     }
-    h1, h2 {
+    h1, h2, h3 {
       margin-top: 0;
-      font-size: 1.25rem;
+      color: var(--text);
     }
+    h2 { font-size: 1.25rem; }
+    h3 { font-size: 1.05rem; border-bottom: 2px solid var(--border); padding-bottom: 5px; margin-top: 20px; }
     .form-group {
       margin-bottom: 15px;
     }
@@ -67,8 +69,9 @@
     }
     .btn-in { background: #22c55e; color: white; }
     .btn-out { background: #ef4444; color: white; }
-    .btn-admin { background: #3b82f6; color: white; width: 100%; }
+    .btn-admin { background: #3b82f6; color: white; width: 100%; margin-top: 10px; }
     .btn-sub { background: #64748b; color: white; }
+    .btn-danger { background: #dc2626; color: white; padding: 6px 12px; font-size: 0.8rem; }
     table {
       width: 100%;
       border-collapse: collapse;
@@ -82,6 +85,13 @@
     }
     th { background: #f1f5f9; }
     .hidden { display: none; }
+    .member-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px;
+      border-bottom: 1px solid var(--border);
+    }
   </style>
 </head>
 <body>
@@ -93,10 +103,7 @@
     <div class="form-group">
       <label>名前を選択</label>
       <select id="userSelect">
-        <option value="">-- 選択してください --</option>
-        <option value="山田太郎">山田太郎</option>
-        <option value="佐藤花子">佐藤花子</option>
-        <option value="鈴木一郎">鈴木一郎</option>
+        <option value="">-- 読み込み中... --</option>
       </select>
     </div>
     <div class="btn-group">
@@ -105,7 +112,7 @@
     </div>
   </div>
 
-  <!-- 手動打刻修正画面 -->
+  <!-- 打刻修正画面 -->
   <div class="card">
     <h2>打刻忘れ・時間修正</h2>
     <div class="form-group">
@@ -121,18 +128,31 @@
   <!-- 管理者ログインボタン -->
   <button class="btn-admin" onclick="toggleAdmin()">管理者メニュー（パスワード必要）</button>
 
-  <!-- 管理者画面 (初期状態は非表示) -->
+  <!-- 管理者画面 -->
   <div id="adminPanel" class="card hidden" style="margin-top: 20px;">
     <h2>管理者専用パネル</h2>
-    
+
+    <!-- パスワード変更 -->
+    <h3>管理者パスワードの変更</h3>
+    <div class="form-group">
+      <label>新しいパスワード</label>
+      <input type="password" id="newPassword" placeholder="新しいパスワードを入力">
+    </div>
+    <button class="btn-sub" style="width:100%;" onclick="changePassword()">パスワード変更を保存</button>
+
+    <!-- 従業員管理 -->
+    <h3>従業員の追加・管理</h3>
+    <div class="form-group" style="display:flex; gap:10px;">
+      <input type="text" id="newMemberName" placeholder="新しい従業員名">
+      <button class="btn-sub" style="flex:0 0 100px;" onclick="addMember()">追加</button>
+    </div>
+    <div id="memberList" style="margin-bottom: 15px;"></div>
+
+    <!-- 条件設定 -->
     <h3>時給・交通費設定</h3>
     <div class="form-group">
       <label>対象従業員</label>
-      <select id="settingUser">
-        <option value="山田太郎">山田太郎</option>
-        <option value="佐藤花子">佐藤花子</option>
-        <option value="鈴木一郎">鈴木一郎</option>
-      </select>
+      <select id="settingUser" onchange="loadUserSetting()"></select>
     </div>
     <div class="form-group">
       <label>時給 (円)</label>
@@ -142,9 +162,10 @@
       <label>交通費/日 (円)</label>
       <input type="number" id="transportFee" value="500">
     </div>
-    <button class="btn-admin" onclick="saveSettings()">設定保存</button>
+    <button class="btn-sub" style="width:100%;" onclick="saveSettings()">時給・交通費を保存</button>
 
-    <h3 style="margin-top: 20px;">打刻・給与計算履歴</h3>
+    <!-- 履歴 -->
+    <h3>打刻・給与計算履歴</h3>
     <div style="overflow-x:auto;">
       <table>
         <thead>
@@ -152,23 +173,19 @@
             <th>名前</th>
             <th>種別</th>
             <th>日時</th>
-            <th>時間/給与想定</th>
+            <th>設定時給/交通費</th>
           </tr>
         </thead>
-        <tbody id="logsTable">
-          <!-- 履歴がここに入ります -->
-        </tbody>
+        <tbody id="logsTable"></tbody>
       </table>
     </div>
   </div>
 </div>
 
-<!-- Firebase SDK (バージョン10) -->
 <script type="module">
   import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
-  import { getFirestore, collection, addDoc, getDocs, doc, setDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+  import { getFirestore, collection, addDoc, getDocs, doc, setDoc, getDoc, deleteDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
 
-  // あなた専用のFirebase設定
   const firebaseConfig = {
     apiKey: "AIzaSyAneApCX9fDC7LaPN_RDrY9HKsscB8O8TU",
     authDomain: "syutaikinsystem.firebaseapp.com",
@@ -184,6 +201,84 @@
   const db = getFirestore(app);
 
   let userSettings = {};
+  let currentPassword = "admin123";
+
+  // 初期化ロード
+  window.addEventListener('load', async () => {
+    await loadAdminConfig();
+    await loadMembers();
+  });
+
+  async function loadAdminConfig() {
+    const docSnap = await getDoc(doc(db, "config", "admin"));
+    if (docSnap.exists() && docSnap.data().password) {
+      currentPassword = docSnap.data().password;
+    }
+  }
+
+  async function loadMembers() {
+    const querySnapshot = await getDocs(collection(db, "members"));
+    const select = document.getElementById('userSelect');
+    const settingSelect = document.getElementById('settingUser');
+    const memberList = document.getElementById('memberList');
+    
+    select.innerHTML = '<option value="">-- 選択してください --</option>';
+    settingSelect.innerHTML = '';
+    memberList.innerHTML = '';
+
+    querySnapshot.forEach((doc) => {
+      const name = doc.data().name;
+      
+      // ドロップダウンに追加
+      select.innerHTML += `<option value="${name}">${name}</option>`;
+      settingSelect.innerHTML += `<option value="${name}">${name}</option>`;
+
+      // 管理用リストに追加
+      const item = document.createElement('div');
+      item.className = 'member-item';
+      item.innerHTML = `<span>${name}</span> <button class="btn-danger" onclick="deleteMember('${doc.id}', '${name}')">削除</button>`;
+      memberList.appendChild(item);
+    });
+
+    if (settingSelect.value) loadUserSetting();
+  }
+
+  window.addMember = async function() {
+    const name = document.getElementById('newMemberName').value.trim();
+    if (!name) return alert('名前を入力してください');
+    
+    await addDoc(collection(db, "members"), { name: name });
+    document.getElementById('newMemberName').value = '';
+    alert(`${name}さんを追加しました`);
+    await loadMembers();
+  };
+
+  window.deleteMember = async function(id, name) {
+    if (confirm(`${name}さんを削除しますか？`)) {
+      await deleteDoc(doc(db, "members", id));
+      await loadMembers();
+    }
+  };
+
+  window.changePassword = async function() {
+    const newPwd = document.getElementById('newPassword').value.trim();
+    if (!newPwd) return alert('新しいパスワードを入力してください');
+    
+    await setDoc(doc(db, "config", "admin"), { password: newPwd });
+    currentPassword = newPwd;
+    document.getElementById('newPassword').value = '';
+    alert('パスワードを変更しました');
+  };
+
+  window.toggleAdmin = function() {
+    const pwd = prompt('管理者パスワードを入力してください');
+    if (pwd === currentPassword) {
+      document.getElementById('adminPanel').classList.remove('hidden');
+      loadLogs();
+    } else if (pwd !== null) {
+      alert('パスワードが間違っています');
+    }
+  };
 
   window.clockIn = async function() {
     const user = document.getElementById('userSelect').value;
@@ -212,46 +307,39 @@
     await addDoc(collection(db, "kintai_logs"), {
       user: user,
       type: type,
-      timestamp: date.toISOString(),
-      createdAt: new Date()
+      timestamp: date.toISOString()
     });
     if(!document.getElementById('adminPanel').classList.contains('hidden')) {
       loadLogs();
     }
   }
 
-  window.toggleAdmin = function() {
-    const pwd = prompt('管理者パスワードを入力してください (初期値: admin123)');
-    if(pwd === 'admin123') {
-      document.getElementById('adminPanel').classList.remove('hidden');
-      loadLogs();
-    } else if(pwd !== null) {
-      alert('パスワードが違います');
+  window.loadUserSetting = async function() {
+    const user = document.getElementById('settingUser').value;
+    if (!user) return;
+    const docSnap = await getDoc(doc(db, "settings", user));
+    if (docSnap.exists()) {
+      document.getElementById('hourlyWage').value = docSnap.data().wage || 1100;
+      document.getElementById('transportFee').value = docSnap.data().transport || 500;
     }
   };
 
   window.saveSettings = async function() {
     const user = document.getElementById('settingUser').value;
+    if (!user) return alert('従業員を選択してください');
     const wage = Number(document.getElementById('hourlyWage').value);
     const trans = Number(document.getElementById('transportFee').value);
     
-    await setDoc(doc(db, "settings", user), {
-      wage: wage,
-      transport: trans
-    });
+    await setDoc(doc(db, "settings", user), { wage, transport: trans });
     userSettings[user] = { wage, transport: trans };
     alert(`${user}さんの設定を保存しました`);
     loadLogs();
   };
 
   async function loadLogs() {
-    // 設定読み込み
     const settingsSnap = await getDocs(collection(db, "settings"));
-    settingsSnap.forEach(doc => {
-      userSettings[doc.id] = doc.data();
-    });
+    settingsSnap.forEach(doc => { userSettings[doc.id] = doc.data(); });
 
-    // ログ読み込み
     const q = query(collection(db, "kintai_logs"), orderBy("timestamp", "desc"));
     const querySnapshot = await getDocs(q);
     const tbody = document.getElementById('logsTable');
@@ -261,21 +349,15 @@
       const data = doc.data();
       const date = new Date(data.timestamp);
       const formattedDate = date.toLocaleString('ja-JP');
-      
       const wage = userSettings[data.user]?.wage || 1100;
       const trans = userSettings[data.user]?.transport || 500;
       
-      let detail = `-`;
-      if(data.type === '出勤') {
-        detail = `設定時給: ${wage}円 / 交通費: ${trans}円`;
-      }
-
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td>${data.user}</td>
         <td>${data.type}</td>
         <td>${formattedDate}</td>
-        <td>${detail}</td>
+        <td>時給:${wage}円 / 交通費:${trans}円</td>
       `;
       tbody.appendChild(tr);
     });
