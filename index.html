@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>出退勤管理システム</title>
+  <style>
+    :root {
+      --primary: #2563eb;
+      --bg: #f8fafc;
+      --card: #ffffff;
+      --text: #0f172a;
+      --border: #e2e8f0;
+    }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      margin: 0;
+      padding: 16px;
+    }
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      padding: 20px;
+      margin-bottom: 20px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+      border: 1px solid var(--border);
+    }
+    h1, h2 {
+      margin-top: 0;
+      font-size: 1.25rem;
+    }
+    .form-group {
+      margin-bottom: 15px;
+    }
+    label {
+      display: block;
+      margin-bottom: 5px;
+      font-weight: bold;
+      font-size: 0.9rem;
+    }
+    select, input {
+      width: 100%;
+      padding: 10px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      box-sizing: border-box;
+      font-size: 1rem;
+    }
+    .btn-group {
+      display: flex;
+      gap: 10px;
+    }
+    button {
+      flex: 1;
+      padding: 12px;
+      border: none;
+      border-radius: 6px;
+      font-weight: bold;
+      font-size: 1rem;
+      cursor: pointer;
+    }
+    .btn-in { background: #22c55e; color: white; }
+    .btn-out { background: #ef4444; color: white; }
+    .btn-admin { background: #3b82f6; color: white; width: 100%; }
+    .btn-sub { background: #64748b; color: white; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 0.85rem;
+    }
+    th, td {
+      border: 1px solid var(--border);
+      padding: 8px;
+      text-align: left;
+    }
+    th { background: #f1f5f9; }
+    .hidden { display: none; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- 従業員用打刻画面 -->
+  <div class="card">
+    <h2>出退勤打刻</h2>
+    <div class="form-group">
+      <label>名前を選択</label>
+      <select id="userSelect">
+        <option value="">-- 選択してください --</option>
+        <option value="山田太郎">山田太郎</option>
+        <option value="佐藤花子">佐藤花子</option>
+        <option value="鈴木一郎">鈴木一郎</option>
+      </select>
+    </div>
+    <div class="btn-group">
+      <button class="btn-in" onclick="clockIn()">出勤</button>
+      <button class="btn-out" onclick="clockOut()">退勤</button>
+    </div>
+  </div>
+
+  <!-- 手動打刻修正画面 -->
+  <div class="card">
+    <h2>打刻忘れ・時間修正</h2>
+    <div class="form-group">
+      <label>修正する日時</label>
+      <input type="datetime-local" id="manualTime">
+    </div>
+    <div class="btn-group">
+      <button class="btn-sub" onclick="manualClock('出勤')">出勤を手動登録</button>
+      <button class="btn-sub" onclick="manualClock('退勤')">退勤を手動登録</button>
+    </div>
+  </div>
+
+  <!-- 管理者ログインボタン -->
+  <button class="btn-admin" onclick="toggleAdmin()">管理者メニュー（パスワード必要）</button>
+
+  <!-- 管理者画面 (初期状態は非表示) -->
+  <div id="adminPanel" class="card hidden" style="margin-top: 20px;">
+    <h2>管理者専用パネル</h2>
+    
+    <h3>時給・交通費設定</h3>
+    <div class="form-group">
+      <label>対象従業員</label>
+      <select id="settingUser">
+        <option value="山田太郎">山田太郎</option>
+        <option value="佐藤花子">佐藤花子</option>
+        <option value="鈴木一郎">鈴木一郎</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label>時給 (円)</label>
+      <input type="number" id="hourlyWage" value="1100">
+    </div>
+    <div class="form-group">
+      <label>交通費/日 (円)</label>
+      <input type="number" id="transportFee" value="500">
+    </div>
+    <button class="btn-admin" onclick="saveSettings()">設定保存</button>
+
+    <h3 style="margin-top: 20px;">打刻・給与計算履歴</h3>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>名前</th>
+            <th>種別</th>
+            <th>日時</th>
+            <th>時間/給与想定</th>
+          </tr>
+        </thead>
+        <tbody id="logsTable">
+          <!-- 履歴がここに入ります -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Firebase SDK (バージョン10) -->
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-app.js";
+  import { getFirestore, collection, addDoc, getDocs, doc, setDoc, query, orderBy } from "https://www.gstatic.com/firebasejs/10.8.0/firebase-firestore.js";
+
+  // あなた専用のFirebase設定
+  const firebaseConfig = {
+    apiKey: "AIzaSyAneApCX9fDC7LaPN_RDrY9HKsscB8O8TU",
+    authDomain: "syutaikinsystem.firebaseapp.com",
+    databaseURL: "https://syutaikinsystem-default-rtdb.firebaseio.com",
+    projectId: "syutaikinsystem",
+    storageBucket: "syutaikinsystem.firebasestorage.app",
+    messagingSenderId: "255216412934",
+    appId: "1:255216412934:web:9f5ea0e0a3ec5ca5905687",
+    measurementId: "G-4TZCW3734R"
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getFirestore(app);
+
+  let userSettings = {};
+
+  window.clockIn = async function() {
+    const user = document.getElementById('userSelect').value;
+    if(!user) return alert('名前を選択してください');
+    await addLog(user, '出勤', new Date());
+    alert(`${user}さん 出勤登録しました`);
+  };
+
+  window.clockOut = async function() {
+    const user = document.getElementById('userSelect').value;
+    if(!user) return alert('名前を選択してください');
+    await addLog(user, '退勤', new Date());
+    alert(`${user}さん 退勤登録しました`);
+  };
+
+  window.manualClock = async function(type) {
+    const user = document.getElementById('userSelect').value;
+    const timeVal = document.getElementById('manualTime').value;
+    if(!user) return alert('名前を選択してください');
+    if(!timeVal) return alert('日時を指定してください');
+    await addLog(user, type, new Date(timeVal));
+    alert(`${user}さん ${type}（手動）を登録しました`);
+  };
+
+  async function addLog(user, type, date) {
+    await addDoc(collection(db, "kintai_logs"), {
+      user: user,
+      type: type,
+      timestamp: date.toISOString(),
+      createdAt: new Date()
+    });
+    if(!document.getElementById('adminPanel').classList.contains('hidden')) {
+      loadLogs();
+    }
+  }
+
+  window.toggleAdmin = function() {
+    const pwd = prompt('管理者パスワードを入力してください (初期値: admin123)');
+    if(pwd === 'admin123') {
+      document.getElementById('adminPanel').classList.remove('hidden');
+      loadLogs();
+    } else if(pwd !== null) {
+      alert('パスワードが違います');
+    }
+  };
+
+  window.saveSettings = async function() {
+    const user = document.getElementById('settingUser').value;
+    const wage = Number(document.getElementById('hourlyWage').value);
+    const trans = Number(document.getElementById('transportFee').value);
+    
+    await setDoc(doc(db, "settings", user), {
+      wage: wage,
+      transport: trans
+    });
+    userSettings[user] = { wage, transport: trans };
+    alert(`${user}さんの設定を保存しました`);
+    loadLogs();
+  };
+
+  async function loadLogs() {
+    // 設定読み込み
+    const settingsSnap = await getDocs(collection(db, "settings"));
+    settingsSnap.forEach(doc => {
+      userSettings[doc.id] = doc.data();
+    });
+
+    // ログ読み込み
+    const q = query(collection(db, "kintai_logs"), orderBy("timestamp", "desc"));
+    const querySnapshot = await getDocs(q);
+    const tbody = document.getElementById('logsTable');
+    tbody.innerHTML = '';
+
+    querySnapshot.forEach((doc) => {
+      const data = doc.data();
+      const date = new Date(data.timestamp);
+      const formattedDate = date.toLocaleString('ja-JP');
+      
+      const wage = userSettings[data.user]?.wage || 1100;
+      const trans = userSettings[data.user]?.transport || 500;
+      
+      let detail = `-`;
+      if(data.type === '出勤') {
+        detail = `設定時給: ${wage}円 / 交通費: ${trans}円`;
+      }
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td>${data.user}</td>
+        <td>${data.type}</td>
+        <td>${formattedDate}</td>
+        <td>${detail}</td>
+      `;
+      tbody.appendChild(tr);
+    });
+  }
+</script>
+
+</body>
+</html>
